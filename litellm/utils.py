@@ -60,6 +60,7 @@ import litellm.litellm_core_utils.json_validation_rule
 from litellm.caching._internal_lru_cache import lru_cache_wrapper
 from litellm.caching.caching import DualCache
 from litellm.caching.caching_handler import CachingHandlerResponse, LLMCachingHandler
+from litellm.integrations.custom_guardrail import CustomGuardrail
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.litellm_core_utils.core_helpers import (
     map_finish_reason,
@@ -418,6 +419,35 @@ def _custom_logger_class_exists_in_failure_callbacks(
     )
 
 
+def get_request_guardrails(kwargs: Dict[str, Any]) -> List[str]:
+    """
+    Get the request guardrails from the kwargs
+    """
+    metadata = kwargs.get("metadata") or {}
+    requester_metadata = metadata.get("requester_metadata") or {}
+    applied_guardrails = requester_metadata.get("guardrails") or []
+    return applied_guardrails
+
+
+def get_applied_guardrails(kwargs: Dict[str, Any]) -> List[str]:
+    """
+    - Add 'default_on' guardrails to the list
+    - Add request guardrails to the list
+    """
+
+    request_guardrails = get_request_guardrails(kwargs)
+    applied_guardrails = []
+    for callback in litellm.callbacks:
+        if callback is not None and isinstance(callback, CustomGuardrail):
+            if callback.guardrail_name is not None:
+                if callback.default_on is True:
+                    applied_guardrails.append(callback.guardrail_name)
+                elif callback.guardrail_name in request_guardrails:
+                    applied_guardrails.append(callback.guardrail_name)
+
+    return applied_guardrails
+
+
 def function_setup(  # noqa: PLR0915
     original_function: str, rules_obj, start_time, *args, **kwargs
 ):  # just run once to check if user wants to send their data anywhere - PostHog/Sentry/Slack/etc.
@@ -435,6 +465,9 @@ def function_setup(  # noqa: PLR0915
 
         ## CUSTOM LLM SETUP ##
         custom_llm_setup()
+
+        ## GET APPLIED GUARDRAILS
+        applied_guardrails = get_applied_guardrails(kwargs)
 
         ## LOGGING SETUP
         function_id: Optional[str] = kwargs["id"] if "id" in kwargs else None
@@ -677,6 +710,7 @@ def function_setup(  # noqa: PLR0915
             dynamic_async_success_callbacks=dynamic_async_success_callbacks,
             dynamic_async_failure_callbacks=dynamic_async_failure_callbacks,
             kwargs=kwargs,
+            applied_guardrails=applied_guardrails,
         )
 
         ## check if metadata is passed in
@@ -3132,51 +3166,56 @@ def get_optional_params(  # noqa: PLR0915
                 else False
             ),
         )
-    elif custom_llm_provider == "vertex_ai" and model in litellm.vertex_llama3_models:
-        optional_params = litellm.VertexAILlama3Config().map_openai_params(
-            non_default_params=non_default_params,
-            optional_params=optional_params,
-            model=model,
-            drop_params=(
-                drop_params
-                if drop_params is not None and isinstance(drop_params, bool)
-                else False
-            ),
-        )
-    elif custom_llm_provider == "vertex_ai" and model in litellm.vertex_mistral_models:
-        if "codestral" in model:
-            optional_params = litellm.CodestralTextCompletionConfig().map_openai_params(
-                model=model,
+    elif custom_llm_provider == "vertex_ai":
+
+        if model in litellm.vertex_mistral_models:
+            if "codestral" in model:
+                optional_params = (
+                    litellm.CodestralTextCompletionConfig().map_openai_params(
+                        model=model,
+                        non_default_params=non_default_params,
+                        optional_params=optional_params,
+                        drop_params=(
+                            drop_params
+                            if drop_params is not None and isinstance(drop_params, bool)
+                            else False
+                        ),
+                    )
+                )
+            else:
+                optional_params = litellm.MistralConfig().map_openai_params(
+                    model=model,
+                    non_default_params=non_default_params,
+                    optional_params=optional_params,
+                    drop_params=(
+                        drop_params
+                        if drop_params is not None and isinstance(drop_params, bool)
+                        else False
+                    ),
+                )
+        elif model in litellm.vertex_ai_ai21_models:
+            optional_params = litellm.VertexAIAi21Config().map_openai_params(
                 non_default_params=non_default_params,
                 optional_params=optional_params,
+                model=model,
                 drop_params=(
                     drop_params
                     if drop_params is not None and isinstance(drop_params, bool)
                     else False
                 ),
             )
-        else:
-            optional_params = litellm.MistralConfig().map_openai_params(
-                model=model,
+        else:  # use generic openai-like param mapping
+            optional_params = litellm.VertexAILlama3Config().map_openai_params(
                 non_default_params=non_default_params,
                 optional_params=optional_params,
+                model=model,
                 drop_params=(
                     drop_params
                     if drop_params is not None and isinstance(drop_params, bool)
                     else False
                 ),
             )
-    elif custom_llm_provider == "vertex_ai" and model in litellm.vertex_ai_ai21_models:
-        optional_params = litellm.VertexAIAi21Config().map_openai_params(
-            non_default_params=non_default_params,
-            optional_params=optional_params,
-            model=model,
-            drop_params=(
-                drop_params
-                if drop_params is not None and isinstance(drop_params, bool)
-                else False
-            ),
-        )
+
     elif custom_llm_provider == "sagemaker":
         # temperature, top_p, n, stream, stop, max_tokens, n, presence_penalty default to None
         optional_params = litellm.SagemakerConfig().map_openai_params(
@@ -5155,9 +5194,10 @@ def _calculate_retry_after(
 # custom prompt helper function
 def register_prompt_template(
     model: str,
-    roles: dict,
+    roles: dict = {},
     initial_prompt_value: str = "",
     final_prompt_value: str = "",
+    tokenizer_config: dict = {},
 ):
     """
     Register a prompt template to follow your custom format for a given model
@@ -5194,12 +5234,27 @@ def register_prompt_template(
     )
     ```
     """
-    model = get_llm_provider(model=model)[0]
-    litellm.custom_prompt_dict[model] = {
-        "roles": roles,
-        "initial_prompt_value": initial_prompt_value,
-        "final_prompt_value": final_prompt_value,
-    }
+    complete_model = model
+    potential_models = [complete_model]
+    try:
+        model = get_llm_provider(model=model)[0]
+        potential_models.append(model)
+    except Exception:
+        pass
+    if tokenizer_config:
+        for m in potential_models:
+            litellm.known_tokenizer_config[m] = {
+                "tokenizer": tokenizer_config,
+                "status": "success",
+            }
+    else:
+        for m in potential_models:
+            litellm.custom_prompt_dict[m] = {
+                "roles": roles,
+                "initial_prompt_value": initial_prompt_value,
+                "final_prompt_value": final_prompt_value,
+            }
+
     return litellm.custom_prompt_dict
 
 
