@@ -38,3 +38,7 @@ model_list:
     model_info:
       model_alias: "Janus-Pro-7B-LM-Q6_K"
       host_node: "192.168.108.167"
+
+litellm_settings:
+  callbacks: ["prometheus"]
+  service_callback: ["prometheus_system"]

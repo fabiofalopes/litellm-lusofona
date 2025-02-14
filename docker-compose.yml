@@ -49,9 +49,22 @@ services:
       - '--storage.tsdb.retention.time=15d'
     restart: always
 
+
+  grafana:
+    image: grafana/grafana-enterprise
+    user: "472"  # This is the grafana user
+    ports:
+      - 3000:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped  # Add restart policy
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
 volumes:
   prometheus_data:
     driver: local
-
-
+  grafana_data:
+    driver: local
 # ...rest of your docker-compose config if any
