@@ -26,6 +26,8 @@ from litellm.types.utils import (
     ModelResponse,
     ProviderField,
     StandardCallbackDynamicParams,
+    StandardLoggingPayloadErrorInformation,
+    StandardLoggingPayloadStatus,
     StandardPassThroughResponseObject,
     TextCompletionResponse,
 )
@@ -1712,6 +1714,7 @@ class WebhookEvent(CallInfo):
 class SpecialModelNames(enum.Enum):
     all_team_models = "all-team-models"
     all_proxy_models = "all-proxy-models"
+    no_default_models = "no-default-models"
 
 
 class InvitationNew(LiteLLMPydanticObjectBase):
@@ -1854,6 +1857,9 @@ class SpendLogsMetadata(TypedDict):
     ]  # special param to log k,v pairs to spendlogs for a call
     requester_ip_address: Optional[str]
     applied_guardrails: Optional[List[str]]
+    status: StandardLoggingPayloadStatus
+    proxy_server_request: Optional[str]
+    error_information: Optional[StandardLoggingPayloadErrorInformation]
 
 
 class SpendLogsPayload(TypedDict):
