@@ -14,18 +14,13 @@ services:
     ports:
       - "4000:4000"
     environment:
-      DATABASE_URL: "postgresql://llmproxy:dbpassword9090@db:5432/litellm"
-      STORE_MODEL_IN_DB: "True"
-      REDIS_HOST: "redis"
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: "your_redis_password"
+        DATABASE_URL: "postgresql://llmproxy:dbpassword9090@db:5432/litellm"
+        STORE_MODEL_IN_DB: "True"
     env_file:
       - .env
     depends_on:
       db:
         condition: service_healthy
-    networks:
-      - litellm-network
 
   db:
     image: postgres
@@ -43,8 +38,6 @@ services:
       interval: 1s
       timeout: 5s
       retries: 10
-    networks:
-      - litellm-network
 
   prometheus:
     image: prom/prometheus
@@ -58,8 +51,6 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=15d'
     restart: always
-    networks:
-      - litellm-network
 
   grafana:
     image: grafana/grafana-enterprise
@@ -72,25 +63,8 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
-    networks:
-      - litellm-network
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --requirepass your_redis_password
-    volumes:
-      - redis-data:/data
-    networks:
-      - litellm-network
-
-networks:
-  litellm-network:
-    driver: bridge
 
 volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
-  redis-data:
