@@ -1,8 +1,10 @@
-version: "3.11"
+#version: "3.11"
 services:
   litellm:
     build:
-      context: .
+      # context - the parent directory of the current directory litellm-lusofona
+      context: ..
+      dockerfile: .litellm-lusofona/Dockerfile
       args:
         target: runtime
     image: ghcr.io/berriai/litellm:main-stable
@@ -14,6 +16,16 @@ services:
     ports:
       - "4000:4000"
     environment:
+      # reads license from .env file
+      DOCS_TITLE: ${DOCS_TITLE}
+      DOCS_DESCRIPTION: ${DOCS_DESCRIPTION}
+
+      # only shows openai routes to user, read from .env file
+      DOCS_FILTERED: ${DOCS_FILTERED}
+
+      # reads license from .env file
+      LITELLM_LICENSE: ${LITELLM_LICENSE}
+
       DATABASE_URL: "postgresql://llmproxy:dbpassword9090@db:5432/litellm"
       STORE_MODEL_IN_DB: "True"
       REDIS_HOST: "redis"
@@ -50,7 +62,8 @@ services:
     image: prom/prometheus
     volumes:
       - prometheus_data:/prometheus
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      # prometheus.yml is in the parent directory alterei './' to '../'
+      - ../prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
     command:
@@ -65,7 +78,7 @@ services:
     image: grafana/grafana-enterprise
     user: "472"
     ports:
-      - 3000:3000
+      - 3001:3000
     volumes:
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
